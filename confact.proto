@@ -1,0 +1,48 @@
+syntax="proto3";
+package confact;
+option go_package="confact/proto";
+
+message RequestVoteArgs {
+  int64 CurrentTerm=1;
+  int64 State=2;
+  int64 Pos=3;
+  int64 LastLogIndex=4;
+  int64 LastLogTerm=5;
+}
+
+message RequestVoteReply {
+  int64 Num=1;
+  int64 State=2;
+  int64 Term=3;
+}
+
+message AppendEntriesArgs {
+  int64 Term=1;
+  int64 LeaderPos=2;
+  int64 PrevLogIndex=3;
+  int64 PrevLogTerm=4;
+  repeated LogEntry Entries=5;
+  int64 CommitIndex=6;
+  int64 Type=7;
+}
+
+message AppendEntriesReply {
+  int64 Term=1;
+  bool Success=2;
+}
+
+message LogEntry {
+  int64 Term=1;
+  int64 Index=2;
+  Entry Command=3;
+}
+
+message Entry{
+  string Key=1;
+  bytes  Value=2;
+}
+
+service Raft {
+  rpc  AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply){}
+  rpc  RequestVote(RequestVoteArgs) returns (RequestVoteReply){}
+}
