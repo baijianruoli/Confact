@@ -1,0 +1,4 @@
+
+serverUrl="localhost:8080"
+peers=["localhost:50010","localhost:50013","localhost:50012"]
+me=0
