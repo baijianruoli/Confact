@@ -1,27 +1,39 @@
 package conf
 
 import (
+	"encoding/json"
 	"github.com/BurntSushi/toml"
+	"io/ioutil"
+	"log"
 	"sync"
 )
 
-var Conf TomlConfig
+var RaftConf RaftConfig
+
+var JsonConf JsonConfig
 
 var once sync.Once
 
-type TomlConfig struct {
-	ServerUrl string
-	Peers     []string
-	Me        int64
+type RaftConfig struct {
+	Me int64
 }
 
 func ConfigInit() {
 	once.Do(func() {
-		toml.DecodeFile("peers.toml", &Conf)
+		data, err := ioutil.ReadFile("./multi-raft.json")
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
+		if err := json.Unmarshal(data, &JsonConf); err != nil {
+			log.Println(err.Error())
+			return
+		}
+		toml.DecodeFile("peers.toml", &RaftConf)
 	})
 }
 
-type Res struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+type Req struct {
+	Key   string      `json:"key"`
+	Value interface{} `json:"value"`
 }

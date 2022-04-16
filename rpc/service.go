@@ -2,15 +2,12 @@ package rpc
 
 import (
 	"confact1/common"
-	"confact1/conf"
+	pb "confact1/confact/proto"
 	"confact1/db"
-	"confact1/snapshot"
 	"confact1/util"
 	"encoding/json"
 	"fmt"
-	pb "github.com/baijianruoli/conf/confact/proto"
 	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"sync"
@@ -20,7 +17,7 @@ import (
 
 type RaftService struct {
 	Mu            sync.Mutex // Lock to protect shared access to this peer's State
-	Peers         []string   // RPC end point64s of all Peers 需要持久化
+	Peers         []int64    // RPC end point64s of all Peers 需要持久化
 	Me            int64      // this peer's index int64o Peers[]
 	Dead          int64
 	State         int64
@@ -28,13 +25,15 @@ type RaftService struct {
 	Leader        bool
 	Leader_pos    int64
 	Random        *rand.Rand
-	ElectionTimer *time.Timer
+	ElectionTimer *time.Timer `json:"-"`
+	BatchTimer    *time.Timer `json:"-"`
 	Log           []*pb.LogEntry
 
 	CommitIndex int64 //已提交的最大编号
 	LastApplied int64
-	NextIndex   [1e6]int64
-	MatchIndex  [1e6]int64
+	NextIndex   []int64
+	MatchIndex  []int64
+	GrpcClient  sync.Map
 }
 
 // 追加日志
@@ -59,7 +58,6 @@ func (rf *RaftService) AppendEntries(ctx context.Context, args *pb.AppendEntries
 		return rep, nil
 	}
 
-
 	rf.CurrentTerm = args.Term
 	// 心跳检测，直接返回
 	if len(args.Entries) == 0 {
@@ -67,7 +65,7 @@ func (rf *RaftService) AppendEntries(ctx context.Context, args *pb.AppendEntries
 		return rep, nil
 	}
 	// 3. 领导人当前没有日志
-	if args.PrevLogIndex == -1 {
+	if args.PrevLogIndex <= 0 {
 		rf.Log = rf.Log[:0]
 		for _, v := range args.Entries {
 			rf.Log = append(rf.Log, v)
@@ -86,10 +84,10 @@ func (rf *RaftService) AppendEntries(ctx context.Context, args *pb.AppendEntries
 				break
 			}
 		}
-		if index == -1 {
-			rep.Success = false
-			return rep, nil
-		}
+		//if index == -1 {
+		//	rep.Success = false
+		//	return rep, nil
+		//}
 		// 处理冲突日志后追加 index是最后匹配的日志
 		rf.Log = rf.Log[0 : index+1]
 		for _, v := range args.Entries {
@@ -116,12 +114,10 @@ func (rf *RaftService) RequestVote(ctx context.Context, args *pb.RequestVoteArgs
 	// 判断日志是否比投票人新（大于等于）
 	// 当前节点没有Log
 
-	var lastLogTerm int64 = 0
-	if len(rf.Log) != 0 {
-		lastLogTerm = rf.Log[len(rf.Log)-1].Term
-	}
+	lastLogTerm := rf.GetLastTerm()
+	lastLogIndex := rf.GetLastIndex()
 
-	if args.LastLogIndex < int64(len(rf.Log)) || args.LastLogTerm < lastLogTerm {
+	if args.LastLogIndex < lastLogIndex || args.LastLogTerm < lastLogTerm {
 		return
 	}
 	// 类型为投票
@@ -160,7 +156,7 @@ func (rf *RaftService) heartBeat() {
 	for rf.Leader {
 		for peer := 0; peer < len(rf.Peers); peer++ {
 			go func(p int) {
-				reply, _ := rf.sendAppendEntries(p, &pb.AppendEntriesArgs{Term: rf.CurrentTerm})
+				reply, _ := rf.sendAppendEntries(int64(p), &pb.AppendEntriesArgs{Term: rf.CurrentTerm})
 				if reply == nil {
 					return
 				}
@@ -179,21 +175,32 @@ func (rf *RaftService) heartBeat() {
 	}
 }
 
-func (rf *RaftService) Snapshot(){
+// 生成快照
+// 生成策略 1000一次
+func (rf *RaftService) Snapshot() {
 	for {
-		if len(rf.Log)>1e3{
+		if rf.LastApplied > 1e3 && rf.LastApplied == rf.CommitIndex {
 			rf.Mu.Lock()
-			sp:=&snapshot.Snapshot{}
-			data,_:=db.Db.Get(util.StringToByte(common.RaftSnapshot),nil)
-			json.Unmarshal(data,&sp)
-			sp.LastIndex+=int64(len(rf.Log))
-			sp.LastTerm=rf.Log[len(rf.Log)-1].Term
-			bytedata,_:=json.Marshal(sp)
-			db.Db.Put(util.StringToByte(common.RaftSnapshot),bytedata,nil)
-			rf.Log=rf.Log[0:0]
+			sp := &Snapshot{}
+			data, _ := db.Db.Get(util.StringToByte(fmt.Sprintf("%s%d", common.RaftSnapshot, rf.Me)), nil)
+			json.Unmarshal(data, &sp)
+			sp.LastIndex += int64(len(rf.Log))
+			sp.LastTerm = rf.Log[len(rf.Log)-1].Term
+			bytedata, _ := json.Marshal(sp)
+			log.Println(rf.LastApplied, "生成快照")
+			db.Db.Put(util.StringToByte(fmt.Sprintf("%s%d", common.RaftSnapshot, rf.Me)), bytedata, nil)
+			// 初始化
+			rf.Log = rf.Log[0:0]
+			rf.LastApplied = 0
+			rf.CommitIndex = 0
+			for _, i := range rf.Peers {
+				rf.MatchIndex[i] = 0
+				rf.NextIndex[i] = 0
+			}
+			rf.Persist()
 			rf.Mu.Unlock()
 		}
-		time.Sleep(1*time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 }
@@ -202,72 +209,44 @@ func (rf *RaftService) Snapshot(){
 func (rf *RaftService) StateMachine() {
 	for rf.Dead != 1 {
 		if rf.LastApplied < rf.CommitIndex {
-			//rf.applyCh <- ApplyMsg{CommandIndex: rf.LastApplied + 1, Command: rf.Log[rf.LastApplied].Command,
-			//	CommandValid: true}
-			db.Db.Put([]byte(rf.Log[rf.LastApplied].Command.Key), rf.Log[rf.LastApplied].Command.Value, nil)
+			rf.Mu.Lock()
+			go db.LevelDBSaveLogs(rf.Log[rf.LastApplied])
 			rf.LastApplied++
+			rf.Mu.Unlock()
 		}
-		time.Sleep(3 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 	}
-}
-
-
-
-// 调用rpc追加日志
-func (rf *RaftService) sendAppendEntries(server int, args *pb.AppendEntriesArgs) (reply *pb.AppendEntriesReply, error error) {
-	conn, err := grpc.Dial(rf.Peers[server], grpc.WithInsecure())
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-	c := pb.NewRaftClient(conn)
-	res, err := c.AppendEntries(context.Background(), args)
-	return res, err
-}
-
-// 调用rpc投票
-func (rf *RaftService) sendRequestVote(server int, args *pb.RequestVoteArgs) (reply *pb.RequestVoteReply, error error) {
-	conn, err := grpc.Dial(rf.Peers[server], grpc.WithInsecure())
-	if err != nil {
-		log.Println(err)
-	}
-	defer conn.Close()
-	c := pb.NewRaftClient(conn)
-	res, err := c.RequestVote(context.Background(), args)
-	if err != nil {
-		log.Println(err)
-	}
-	return res, err
 }
 
 // 广播日志
-func (rf *RaftService) AppendLogs(res *conf.Res) {
+func (rf *RaftService) AppendLogs() {
 	var ans int32 = 0
 
-	for peer := 0; peer < len(rf.Peers); peer++ {
-		if int64(peer) == rf.Me {
+	for _, peer := range rf.Peers {
+		if peer == rf.Me {
 			continue
 		}
-		if !rf.Leader{
+		if !rf.Leader {
 			return
 		}
 		//prevLogIndex 为 NextIndex的值
-		go func(peer int, retry int) {
+		go func(peer int64, retry int) {
 			for {
 				var term int64
 				if !rf.Leader {
 					break
 				}
-				if rf.NextIndex[peer] <= 0 {
+				if rf.MatchIndex[peer] <= 0 {
 					term = -1
 				} else {
-					term = rf.Log[rf.NextIndex[peer]-1].Term
+					term = rf.Log[rf.MatchIndex[peer]-1].Term
 				}
 				var arg = &pb.AppendEntriesArgs{Term: rf.CurrentTerm, LeaderPos: rf.Me,
-					PrevLogIndex: rf.NextIndex[peer] - 1, PrevLogTerm: term,
-					Entries: rf.Log[rf.NextIndex[peer]:], CommitIndex: rf.CommitIndex}
+					PrevLogIndex: rf.MatchIndex[peer] - 1, PrevLogTerm: term,
+					Entries: rf.Log[rf.MatchIndex[peer]:], CommitIndex: rf.CommitIndex}
 
 				// 调用日志追加rpc
+				fmt.Printf("%d 发送日志 起始位置%d 终止位置%d\n", rf.Me, rf.MatchIndex[peer]-1, rf.CommitIndex)
 				reply, _ := rf.sendAppendEntries(peer, arg)
 				if reply == nil {
 					log.Println(fmt.Sprintf("%d AppendEntries is nil", peer))
@@ -309,8 +288,8 @@ func (rf *RaftService) AppendLogs(res *conf.Res) {
 				rf.CommitIndex = int64(len(rf.Log))
 				rf.Mu.Unlock()
 				// 二阶段发出提交日志
-				for peer := 0; peer < len(rf.Peers); peer++ {
-					go func(peer int) {
+				for _, peer := range rf.Peers {
+					go func(peer int64) {
 						rf.Mu.Lock()
 						rf.NextIndex[peer] = int64(len(rf.Log))
 						rf.MatchIndex[peer] = rf.NextIndex[peer]
@@ -330,26 +309,33 @@ func (rf *RaftService) AppendLogs(res *conf.Res) {
 
 }
 
+// 持久化
 func (rf *RaftService) Persist() {
-	data, _ := json.Marshal(rf)
-	db.Db.Put(util.StringToByte(common.RaftPersist), data, nil)
-	log.Println("raft persist")
+	go func() {
+		data, err := json.Marshal(rf)
+		if err != nil {
+			log.Printf("raft persist error %s", err.Error())
+			return
+		}
+		db.Db.Put(util.StringToByte(fmt.Sprintf("%s%d", common.RaftPersist, rf.Me)), data, nil)
+		log.Println("raft persist")
+	}()
 }
 
+// 读取持久化
 func (rf *RaftService) ReadPersist() {
 	rafts := &RaftService{}
-	data, err := db.Db.Get(util.StringToByte(common.RaftPersist), nil)
-	if err!=nil{
+	data, err := db.Db.Get(util.StringToByte(fmt.Sprintf("%s%d", common.RaftPersist, rf.Me)), nil)
+	if err == nil {
 		json.Unmarshal(data, &rafts)
 		log.Println("raft read persist")
-		rf.CurrentTerm=rafts.CurrentTerm
-		rf.Leader_pos=rafts.Leader_pos
-		rf.Log=rafts.Log
-	}else{
-		sp:=&snapshot.Snapshot{LastIndex: 0,LastTerm: 0}
-		data,_:=json.Marshal(sp)
-		db.Db.Put(util.StringToByte(common.RaftSnapshot),data,nil)
-		Rf.Leader_pos = -1
+		rf.CurrentTerm = rafts.CurrentTerm
+		rf.Leader_pos = rafts.Leader_pos
+		rf.Log = rafts.Log
+		rf.Leader = rafts.Leader
+	} else {
+		rf.Persist()
+		rf.Leader_pos = -1
 	}
 
 }

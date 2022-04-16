@@ -5,22 +5,21 @@ import (
 	"unsafe"
 )
 
-func StringToByte(s string)  []byte{
-	sh:=*(*reflect.StringHeader)(unsafe.Pointer(&s))
-	b:=&reflect.SliceHeader{
-		Len: sh.Len,
-		Cap: sh.Len,
-		Data: sh.Data,
-	}
-	return *(*[]byte)(unsafe.Pointer(&b))
+func StringToByte(s string) []byte {
+	var b []byte
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	pByte := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	pByte.Data = sh.Data
+	pByte.Len = sh.Len
+	pByte.Cap = sh.Len
+	return b
 }
 
-func BYteToString (b byte)  string{
-	sh:=*(*reflect.SliceHeader)(unsafe.Pointer(&b))
-	s:=&reflect.StringHeader{
-		Len: sh.Len,
-		Data: sh.Data,
-	}
-	return *(*string)(unsafe.Pointer(&s))
+func ByteToString(b []byte) string {
+	var s string
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	pByte := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	sh.Data = pByte.Data
+	sh.Len = pByte.Len
+	return s
 }
-

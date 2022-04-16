@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -25,13 +26,20 @@ import (
 //}
 
 func BenchmarkStringToByte(b *testing.B) {
-	s:=""
-	for i:=0;i<1e5;i++{
-		s+="123"
+	s := ""
+	for i := 0; i < 1e5; i++ {
+		s += "123"
 	}
 	b.ResetTimer()
-	for i:=0;i<b.N;i++{
+	for i := 0; i < b.N; i++ {
 		StringToByte(s)
 	}
 
+}
+
+func TestStringToByte(t *testing.T) {
+	s := StringToByte("123")
+	g := StringToByte("456")
+	fmt.Println(s)
+	fmt.Println(g)
 }

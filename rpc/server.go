@@ -1,25 +1,30 @@
 package rpc
 
 import (
-	tc "confact1/conf"
-	pb "github.com/baijianruoli/conf/confact/proto"
-	"log"
+	"confact1/conf"
+	pb "confact1/confact/proto"
+	"confact1/logs"
+
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-var Rf *RaftService
+var RaftMap sync.Map
 
-func Start() {
-	Rf = &RaftService{}
+func Start(runConfig *conf.RaftInfo) {
+	Rf := &RaftService{}
 	Rf.ReadPersist()
-	Rf.Snapshot()
-	Rf.Peers = tc.Conf.Peers
-	Rf.Me = tc.Conf.Me
+	go Rf.SnapshotInit()
+	go Rf.Snapshot()
+	Rf.Peers = runConfig.RaftList
+	Rf.Me = runConfig.RaftID
 	Rf.LastApplied = 0
 	Rf.CommitIndex = 0
+	// 为什么是multi-raft，因为数组长度不够
+	Rf.MatchIndex = make([]int64, len(conf.JsonConf.RaftsRPC))
+	Rf.NextIndex = make([]int64, len(conf.JsonConf.RaftsRPC))
 	Rf.Random = rand.New(rand.NewSource(time.Now().UnixNano() + Rf.Me))
 	Rf.Leader = false
 	clock := Rf.Random.Intn(500)
@@ -27,6 +32,11 @@ func Start() {
 	Rf.ElectionTimer = time.NewTimer(time.Duration(clock * 1e6))
 	// 开启状态机
 	go Rf.StateMachine()
+
+	// 加入raftMap
+
+	RaftMap.Store(runConfig.RaftID, Rf)
+
 	//超时计数器
 	var wg sync.WaitGroup
 	go func() {
@@ -34,27 +44,22 @@ func Start() {
 			//初始化
 			<-Rf.ElectionTimer.C
 			Rf.init()
+			logs.PrintInfo(Rf.Me, "当前Term ", Rf.CurrentTerm)
 			if Rf.Dead == 1 {
 				break
 			}
 			var voteNum int64 = 1
-			for i := 0; i < len(Rf.Peers); i++ {
-				if i == (int)(Rf.Me) {
+			for _, i := range Rf.Peers {
+				if i == Rf.Me {
 					continue
 				}
 				wg.Add(1)
 				// 判断Log日志是否为空
-				var args = pb.RequestVoteArgs{}
-				if len(Rf.Log) == 0 {
-					args = pb.RequestVoteArgs{CurrentTerm: Rf.CurrentTerm,
-						LastLogIndex: 0, LastLogTerm: 0}
-				} else {
-					args = pb.RequestVoteArgs{CurrentTerm: Rf.CurrentTerm,
-						LastLogIndex: int64(len(Rf.Log)), LastLogTerm: Rf.Log[len(Rf.Log)-1].Term}
-				}
-				go func(pos int) {
+				args := pb.RequestVoteArgs{CurrentTerm: Rf.CurrentTerm,
+					LastLogIndex: Rf.GetLastIndex(), LastLogTerm: Rf.GetLastTerm()}
+				go func(pos int64) {
 					//发起投票
-					reply, _ := Rf.sendRequestVote(pos, &args)
+					reply, _ := Rf.sendRequestVote(int64(pos), &args)
 					if reply == nil {
 						wg.Done()
 						return
@@ -72,13 +77,15 @@ func Start() {
 					}
 					// 接受投票
 					if reply.State == 1 {
+						logs.PrintInfo(Rf.Me, "对方raftID: ", pos, "同意该投票")
 						atomic.AddInt64(&voteNum, 1)
 					}
 					if voteNum > int64(len(Rf.Peers)/2) && !Rf.Leader {
 						//选举成功，更新信息
 						//TODO 如果自己不是candidate而是给别人投票了变成follower怎么办
 						Rf.Mu.Lock()
-						log.Println(Rf.Me, "成为Leader ", Rf.CurrentTerm)
+						logs.PrintInfo(Rf.Me, "voteNum ", voteNum)
+						logs.PrintInfo(Rf.Me, "成为Leader", Rf.CurrentTerm)
 						Rf.Leader = true
 						Rf.Leader_pos = Rf.Me
 						Rf.State = 2
@@ -89,8 +96,8 @@ func Start() {
 						}
 						Rf.Mu.Unlock()
 						// 广播Leader消息
-						for j := 0; j < len(Rf.Peers); j++ {
-							if j == int(Rf.Me) {
+						for _, j := range Rf.Peers {
+							if j == Rf.Me {
 								continue
 							}
 							go Rf.sendRequestVote(j, &pb.RequestVoteArgs{State: 1, Pos: Rf.Me, CurrentTerm: Rf.CurrentTerm})
