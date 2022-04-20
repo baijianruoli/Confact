@@ -11,5 +11,5 @@ func Hash(key string) int64 {
 	for _, item := range res {
 		ros += int64(item)
 	}
-	return ros % conf.JsonConf.Replicate
+	return ros % conf.JsonConf.Nodes
 }

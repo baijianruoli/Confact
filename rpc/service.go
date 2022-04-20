@@ -154,9 +154,9 @@ func (rf *RaftService) init() {
 // 心跳检测
 func (rf *RaftService) heartBeat() {
 	for rf.Leader {
-		for peer := 0; peer < len(rf.Peers); peer++ {
-			go func(p int) {
-				reply, _ := rf.sendAppendEntries(int64(p), &pb.AppendEntriesArgs{Term: rf.CurrentTerm})
+		for _, peer := range rf.Peers {
+			go func(p int64) {
+				reply, _ := rf.sendAppendEntries(p, &pb.AppendEntriesArgs{Term: rf.CurrentTerm})
 				if reply == nil {
 					return
 				}
@@ -173,6 +173,12 @@ func (rf *RaftService) heartBeat() {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// 与配置中心的心跳检测
+func (rf *RaftService) HeartBeat(ctx context.Context, args *pb.HeartBeatArgs) (reply *pb.HeartBeatReply, error error) {
+
+	return &pb.HeartBeatReply{IsLeader: rf.Leader}, nil
 }
 
 // 生成快照

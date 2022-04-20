@@ -3,7 +3,6 @@ package rpc
 import (
 	"confact1/conf"
 	pb "confact1/confact/proto"
-	"confact1/util"
 	"context"
 	"google.golang.org/grpc"
 	"log"
@@ -24,9 +23,7 @@ func (rf *RaftService) grpcClient(server int64) pb.RaftClient {
 	}
 }
 
-func GetRaftService(key string) *RaftService {
-	raftID := util.Hash(key)
-
+func GetRaftService(raftID int64) *RaftService {
 	data, _ := RaftMap.Load(raftID)
 	return data.(*RaftService)
 }

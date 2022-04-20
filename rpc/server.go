@@ -34,7 +34,6 @@ func Start(runConfig *conf.RaftInfo) {
 	go Rf.StateMachine()
 
 	// 加入raftMap
-
 	RaftMap.Store(runConfig.RaftID, Rf)
 
 	//超时计数器
@@ -85,7 +84,7 @@ func Start(runConfig *conf.RaftInfo) {
 						//TODO 如果自己不是candidate而是给别人投票了变成follower怎么办
 						Rf.Mu.Lock()
 						logs.PrintInfo(Rf.Me, "voteNum ", voteNum)
-						logs.PrintInfo(Rf.Me, "成为Leader", Rf.CurrentTerm)
+						logs.PrintInfo(Rf.Me, "成为Leader Term： ", Rf.CurrentTerm)
 						Rf.Leader = true
 						Rf.Leader_pos = Rf.Me
 						Rf.State = 2

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -56,7 +57,7 @@ func SetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rf := rpc.GetRaftService(req.Key)
+	rf := rpc.GetRaftService(req.RaftID)
 
 	if !rf.Leader {
 		fmt.Fprintf(w, "当前节点不是Leader，不接受写操作")
@@ -97,13 +98,14 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 // 获取节点级别信息
 func InfoHandler(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	key := v.Get("key")
-	rf := rpc.GetRaftService(key)
+	raftID := v.Get("raft_id")
+	raftIDs, _ := strconv.Atoi(raftID)
+	rf := rpc.GetRaftService(int64(raftIDs))
 	fmt.Fprint(w, rf.CurrentTerm)
 }
 
 func AppendLog(logType pb.LogType, req *conf.Req, startTs int64) {
-	rf := rpc.GetRaftService(req.Key)
+	rf := rpc.GetRaftService(req.RaftID)
 	switch logType {
 	case pb.LogType_DATA:
 		binaryData, _ := json.Marshal(req.Value)
@@ -142,8 +144,9 @@ func GetDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 func GetSnapshot(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	key := v.Get("key")
-	rf := rpc.GetRaftService(key)
+	raftID := v.Get("raft_id")
+	raftIDs, _ := strconv.Atoi(raftID)
+	rf := rpc.GetRaftService(int64(raftIDs))
 	rep, err := db.Db.Get(util.StringToByte(fmt.Sprintf("%s%d", common.RaftSnapshot, rf.Me)), nil)
 	if err != nil {
 		fmt.Fprintf(w, "快照不存在")
@@ -160,8 +163,9 @@ func GetSnapshot(w http.ResponseWriter, r *http.Request) {
 
 func GetPersist(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	key := v.Get("key")
-	rf := rpc.GetRaftService(key)
+	raftID := v.Get("raft_id")
+	raftIDs, _ := strconv.Atoi(raftID)
+	rf := rpc.GetRaftService(int64(raftIDs))
 	rep, err := db.Db.Get(util.StringToByte(fmt.Sprintf("%s%d", common.RaftPersist, rf.Me)), nil)
 	if err != nil {
 		fmt.Fprintf(w, "持久化不存在")

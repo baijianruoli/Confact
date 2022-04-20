@@ -34,6 +34,7 @@ func ConfigInit() {
 }
 
 type Req struct {
-	Key   string      `json:"key"`
-	Value interface{} `json:"value"`
+	Key    string      `json:"key"`
+	Value  interface{} `json:"value"`
+	RaftID int64       `json:"raft_id"`
 }

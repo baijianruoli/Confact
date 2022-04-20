@@ -67,7 +67,16 @@ message Entry{
 
 }
 
+message HeartBeatArgs{
+   int64 StartTs = 1;
+}
+
+message HeartBeatReply{
+    bool IsLeader=1;
+}
+
 service Raft {
   rpc  AppendEntries(AppendEntriesArgs) returns (AppendEntriesReply){}
   rpc  RequestVote(RequestVoteArgs) returns (RequestVoteReply){}
+  rpc  HeartBeat(HeartBeatArgs) returns (HeartBeatReply){}
 }
