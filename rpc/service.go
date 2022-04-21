@@ -226,7 +226,7 @@ func (rf *RaftService) StateMachine() {
 
 // 广播日志
 func (rf *RaftService) AppendLogs() {
-	var ans int32 = 0
+	var ans int32 = 1
 
 	for _, peer := range rf.Peers {
 		if peer == rf.Me {
@@ -275,10 +275,10 @@ func (rf *RaftService) AppendLogs() {
 						rf.Persist()
 						rf.Mu.Unlock()
 						break
-					} else if rf.NextIndex[peer] == 0 {
+					} else if rf.MatchIndex[peer] == 0 {
 						fmt.Printf("当前位置 %d,term %d,日志 %d leader %v\n", rf.Me, rf.CurrentTerm, rf.CommitIndex, rf.Leader)
 					} else {
-						rf.NextIndex[peer]--
+						rf.MatchIndex[peer]--
 					}
 				}
 			}

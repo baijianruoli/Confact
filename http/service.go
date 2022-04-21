@@ -16,51 +16,59 @@ import (
 	"time"
 )
 
+func ResponseInfo(code int64, msg interface{}, w http.ResponseWriter) {
+	response := &conf.Response{
+		Code: code,
+		Msg:  msg,
+	}
+	data, _ := json.Marshal(response)
+	fmt.Fprint(w, util.ByteToString(data))
+}
+
 func GetHandler(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
 	key := v.Get("key")
 	rep, err := db.Db.Get(util.StringToByte(key), nil)
 	if err != nil {
-		fmt.Fprintf(w, "值不存在")
+		ResponseInfo(500, "值不存在", w)
 		return
 	}
 	node := &db.Node{}
 	if jsonErr := json.Unmarshal(rep, &node); jsonErr != nil {
-		fmt.Fprintf(w, "系统错误")
+		ResponseInfo(500, "系统错误", w)
 		return
 	}
 	ts := time.Now().UnixNano() / 1e6
 	entry := arrays.WriteBinaryDomain.LowerSearchNode(node.WriteList, ts)
 	if entry == nil {
-		fmt.Fprintf(w, "value不存在")
+		ResponseInfo(500, "value不存在", w)
 		return
 	}
 	entry = arrays.DataBinaryDomain.LowerSearchNode(node.ValuesList, entry.Command.Write.StartTs)
-	var result interface{}
-	if jsonErr := json.Unmarshal(entry.Command.Values.Value, &result); jsonErr != nil {
-		fmt.Fprintf(w, "序列化错误")
-		return
+	var response interface{}
+	if err := json.Unmarshal(entry.Command.Values.Value, &response); err != nil {
+		ResponseInfo(500, err.Error(), w)
 	}
-	fmt.Fprint(w, result)
+	ResponseInfo(200, response, w)
 }
 
 func SetHandler(w http.ResponseWriter, r *http.Request) {
 
 	content, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		fmt.Fprintf(w, err.Error())
+		ResponseInfo(500, err.Error(), w)
 		return
 	}
 	var req conf.Req
 	if jsonErr := json.Unmarshal(content, &req); jsonErr != nil {
-		fmt.Fprintf(w, jsonErr.Error())
+		ResponseInfo(500, jsonErr.Error(), w)
 		return
 	}
 
 	rf := rpc.GetRaftService(req.RaftID)
 
 	if !rf.Leader {
-		fmt.Fprintf(w, "当前节点不是Leader，不接受写操作")
+		ResponseInfo(500, "当前节点不是Leader，不接受写操作", w)
 		return
 	}
 
@@ -86,8 +94,7 @@ func SetHandler(w http.ResponseWriter, r *http.Request) {
 		rf.Mu.Unlock()
 	}
 	rf.Persist()
-	fmt.Fprintf(w, "ok")
-
+	ResponseInfo(200, "ok", w)
 }
 
 // 删除功能暂时不做
@@ -101,7 +108,7 @@ func InfoHandler(w http.ResponseWriter, r *http.Request) {
 	raftID := v.Get("raft_id")
 	raftIDs, _ := strconv.Atoi(raftID)
 	rf := rpc.GetRaftService(int64(raftIDs))
-	fmt.Fprint(w, rf.CurrentTerm)
+	ResponseInfo(200, rf.CurrentTerm, w)
 }
 
 func AppendLog(logType pb.LogType, req *conf.Req, startTs int64) {
@@ -131,15 +138,14 @@ func GetDetailHandler(w http.ResponseWriter, r *http.Request) {
 	key := v.Get("key")
 	rep, err := db.Db.Get(util.StringToByte(key), nil)
 	if err != nil {
-		fmt.Fprintf(w, "值不存在")
+		ResponseInfo(500, "值不存在", w)
 		return
 	}
-	node := &db.Node{}
-	if jsonErr := json.Unmarshal(rep, &node); jsonErr != nil {
-		fmt.Fprintf(w, "系统错误")
-		return
+	var response interface{}
+	if err := json.Unmarshal(rep, &response); err != nil {
+		ResponseInfo(500, err.Error(), w)
 	}
-	fmt.Fprint(w, node)
+	ResponseInfo(200, response, w)
 }
 
 func GetSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -149,16 +155,14 @@ func GetSnapshot(w http.ResponseWriter, r *http.Request) {
 	rf := rpc.GetRaftService(int64(raftIDs))
 	rep, err := db.Db.Get(util.StringToByte(fmt.Sprintf("%s%d", common.RaftSnapshot, rf.Me)), nil)
 	if err != nil {
-		fmt.Fprintf(w, "快照不存在")
+		ResponseInfo(500, "快照不存在", w)
 		return
 	}
-	snapshot := &rpc.Snapshot{}
-	if jsonErr := json.Unmarshal(rep, &snapshot); jsonErr != nil {
-		fmt.Fprintf(w, "系统错误")
-		return
+	var response interface{}
+	if err := json.Unmarshal(rep, &response); err != nil {
+		ResponseInfo(500, err.Error(), w)
 	}
-	data, _ := json.Marshal(snapshot)
-	fmt.Fprint(w, util.ByteToString(data))
+	ResponseInfo(200, response, w)
 }
 
 func GetPersist(w http.ResponseWriter, r *http.Request) {
@@ -168,15 +172,13 @@ func GetPersist(w http.ResponseWriter, r *http.Request) {
 	rf := rpc.GetRaftService(int64(raftIDs))
 	rep, err := db.Db.Get(util.StringToByte(fmt.Sprintf("%s%d", common.RaftPersist, rf.Me)), nil)
 	if err != nil {
-		fmt.Fprintf(w, "持久化不存在")
+		ResponseInfo(500, "持久化不存在", w)
 		return
 	}
-	raft := &rpc.RaftService{}
-	if jsonErr := json.Unmarshal(rep, &raft); jsonErr != nil {
-		fmt.Fprintf(w, "系统错误")
-		return
+	var response interface{}
+	if err := json.Unmarshal(rep, &response); err != nil {
+		ResponseInfo(500, err.Error(), w)
 	}
-	data, _ := json.Marshal(raft)
-	fmt.Fprint(w, util.ByteToString(data))
+	ResponseInfo(200, response, w)
 
 }
