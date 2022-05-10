@@ -3,6 +3,7 @@ package db
 import (
 	"confact1/arrays"
 	pb "confact1/confact/proto"
+	"confact1/logs"
 	"confact1/util"
 	"encoding/json"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -44,10 +45,15 @@ func LevelDBSaveLogs(logEntry *pb.LogEntry) {
 	case pb.LogType_DATA:
 		nodeEntry.ValuesList = arrays.DataBinaryDomain.Insert(nodeEntry.ValuesList, logEntry)
 	case pb.LogType_LOCK:
-		nodeEntry.LockList = append(nodeEntry.LockList, logEntry)
+		nodeEntry.LockList = arrays.LockBinaryDomain.Insert(nodeEntry.LockList, logEntry)
 	case pb.LogType_WRITE:
 		nodeEntry.WriteList = arrays.WriteBinaryDomain.Insert(nodeEntry.WriteList, logEntry)
-
+	case pb.LogType_DELETE_LOCK:
+		index := arrays.LockBinaryDomain.UpperSearchIndex(nodeEntry.LockList, logEntry)
+		if index-1 >= 0 && nodeEntry.LockList[index-1].Command.Lock.StartTs == logEntry.Command.Lock.StartTs {
+			nodeEntry.LockList[index-1].Command.Lock.Deleted = true
+		}
+		logs.PrintInfo(logEntry.Index, "软删除")
 	}
 	data, _ := json.Marshal(nodeEntry)
 	Db.Put(util.StringToByte(logEntry.Command.Key), data, nil)

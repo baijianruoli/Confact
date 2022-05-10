@@ -41,6 +41,7 @@ enum LogType {
   DATA = 0;
   LOCK = 1;
   WRITE = 2;
+  DELETE_LOCK = 3;
 }
 message Values{
   int64 StartTs = 1;
@@ -50,6 +51,7 @@ message Values{
 message Lock {
   int64 StartTs = 1;
   string PrimaryRow = 2;
+  bool   Deleted   =  3;
 }
 
 message Write {
